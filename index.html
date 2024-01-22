@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Barcode Scanner</title>
+</head>
+<body>
+    <input type="text" id="searchField" placeholder="Click to scan barcode" autocomplete="off">
+    <button id="searchButton">Search</button>
+    <div id="bookInfoContainer"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/quagga@latest/dist/quagga.min.js"></script>
+    <script>
+        let barcodeData;
+        const searchField = document.getElementById('searchField');
+        const searchButton = document.getElementById('searchButton');
+
+        searchField.addEventListener('click', () => {
+            openCameraCapture();
+        });
+
+        searchButton.addEventListener('click', () => {
+            handleSearch();
+        });
+
+        let cameraStream; // Store the camera stream globally
+        let isCameraAccessRequested = false; // Flag to track whether camera access has been requested
+
+        function openCameraCapture() {
+            if (!isCameraAccessRequested) {
+                // Request camera access only if not requested before
+                navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+                    .then(stream => {
+                        cameraStream = stream;
+                        handleCameraStream(stream, searchField);
+                    })
+                    .catch(handleError);
+
+                isCameraAccessRequested = true;
+            } else {
+                // Use the existing camera stream
+                handleCameraStream(cameraStream, searchField);
+            }
+        }
+
+
+        function handleCameraStream(stream, searchField) {
+            const video = document.createElement('video');
+            document.body.appendChild(video);
+
+            video.srcObject = stream;
+            video.play();
+
+            // Use a flag to ensure the callback is executed only once
+            let barcodeDetected = false;
+
+            Quagga.init({
+                inputStream: {
+                    name: "Live",
+                    type: "LiveStream",
+                    target: video,
+                },
+                decoder: {
+                    readers: ["ean_reader"],
+                },
+            }, function(err) {
+                if (err) {
+                    console.error("Quagga initialization failed:", err);
+                    handleError(err);
+                    return;
+                }
+                Quagga.start();
+
+                setTimeout(() => {
+                    Quagga.stop();
+                }, 3000);
+            });
+
+            Quagga.onDetected((result) => {
+                if (!barcodeDetected) {
+                    barcodeDetected = true;
+
+                    const scannedBarcode = result.codeResult.code;
+                    pasteIntoSearchField(scannedBarcode, searchField);
+                    
+                    // Hide the video element
+                    video.style.display = 'none';
+
+                    // Close the camera capture
+                    closeCameraCapture(video, stream);
+                }
+            });
+        }
+
+        function pasteIntoSearchField(barcode, searchField) {
+            barcodeData = barcode;
+            searchField.value = barcode;
+            displayFeedback("Barcode scanned successfully!");
+        }
+
+        function closeCameraCapture(video, stream) {
+            if (video && video.parentNode) {
+                video.pause();
+                video.parentNode.removeChild(video);
+            }
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+        }
+
+
+        function handleError(error) {
+            displayFeedback("Error accessing camera: " + error.message);
+            closeCameraCapture();
+        }
+
+        function displayFeedback(message) {
+            const bookInfoContainer = document.getElementById('bookInfoContainer');
+            bookInfoContainer.innerHTML = message;
+        }
+
+
+        function handleSearch() {
+            if (barcodeData) {
+                const apiUrl = `https://openlibrary.org/search.json?q=${barcodeData}`;
+
+                fetch(apiUrl)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.numFound > 0 && data.docs && data.docs[0].title) {
+                            const title = data.docs[0].title;
+                            const bookInfoMessage = `Book Title: ${title}`;
+                            displayFeedback(bookInfoMessage);
+                        } else {
+                            displayFeedback("Book information not found");
+                        }
+                    })
+                    .catch(error => {
+                        console.error("Error fetching book information:", error);
+                        displayFeedback("Error fetching book information");
+                    });
+
+                barcodeData = null;
+            } else {
+                displayFeedback("No barcode scanned");
+            }
+        }
+
+    </script>
+</body>
+</html>
